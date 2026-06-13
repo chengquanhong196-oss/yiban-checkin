@@ -184,7 +184,7 @@ def web_index(request: Request, user=Depends(get_web_user)):
 
 @app.get("/login", response_class=HTMLResponse)
 def web_login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "user": None})
+    return templates.TemplateResponse("login.html", {"user": None})
 
 
 @app.post("/login")
@@ -203,7 +203,7 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
 
 @app.get("/register", response_class=HTMLResponse)
 def web_register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request, "user": None})
+    return templates.TemplateResponse("register.html", {"user": None})
 
 
 @app.post("/register")
