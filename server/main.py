@@ -185,7 +185,7 @@ def web_index():
     except:
         return HTMLResponse(content="<h1>Loading...</h1>")
 def web_login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"user": None})
+    return _html("login.html")  #  {"user": None})
 
 
 @app.post("/login")
@@ -193,7 +193,7 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
                      db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
-        return templates.TemplateResponse("login.html",
+        return _html("login.html")  # 
             {"user": None, "error": "邮箱或密码错误"})
     token = create_access_token(user.id)
     resp = RedirectResponse("/dashboard", status_code=302)
@@ -204,17 +204,17 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
 
 @app.get("/register", response_class=HTMLResponse)
 def web_register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"user": None})
+    return _html("register.html")  #  {"user": None})
 
 
 @app.post("/register")
 def web_register_submit(request: Request, email: str = Form(...), password: str = Form(...),
                         phone: str = Form(""), db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == email).first():
-        return templates.TemplateResponse("register.html",
+        return _html("register.html")  # 
             {"user": None, "error": "该邮箱已注册"})
     if len(password) < 6:
-        return templates.TemplateResponse("register.html",
+        return _html("register.html")  # 
             {"user": None, "error": "密码至少 6 位"})
 
     user = User(email=email, hashed_password=hash_password(password))
