@@ -1,0 +1,102 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'          # v1.0.0, v1.0.1, etc.
+  workflow_dispatch:   # 也允许手动触发
+
+jobs:
+  build:
+    runs-on: macos-14  # Apple Silicon runner
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build CLI
+        run: swift build -c release --product yiban-checkin
+
+      - name: Build GUI App
+        run: swift build -c release --product YibanCheckin
+
+      - name: Create App Bundle
+        run: |
+          mkdir -p dist/YibanCheckin.app/Contents/MacOS
+          mkdir -p dist/YibanCheckin.app/Contents/Resources
+          cp .build/release/YibanCheckin dist/YibanCheckin.app/Contents/MacOS/
+          cp Sources/GUI/Resources/AppIcon.icns dist/YibanCheckin.app/Contents/Resources/
+          cat > dist/YibanCheckin.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>YibanCheckin</string>
+              <key>CFBundleDisplayName</key>
+              <string>易班签到</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.yiban.checkin</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${{ github.ref_name }}</string>
+              <key>CFBundleExecutable</key>
+              <string>YibanCheckin</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Package DMG
+        run: |
+          mkdir -p dist/dmg
+          cp -R dist/YibanCheckin.app dist/dmg/
+          cp README.md dist/dmg/
+          hdiutil create -volname "YibanCheckin" -srcfolder dist/dmg -ov -format UDZO dist/YibanCheckin.dmg
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yiban-checkin-${{ github.ref_name }}
+          path: |
+            dist/YibanCheckin.dmg
+            .build/release/yiban-checkin
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: ${{ github.ref_name }}
+          body: |
+            ## yiban-checkin ${{ github.ref_name }}
+
+            ### 📦 Downloads
+            - `YibanCheckin.dmg` — macOS App (drag to Applications)
+            - `yiban-checkin` — CLI binary
+
+            ### 🔧 Install
+            ```bash
+            # CLI
+            cp yiban-checkin ~/bin/
+            ~/bin/yiban-checkin --diagnose
+
+            # GUI
+            # Open YibanCheckin.dmg, drag to Applications
+            ```
+
+            See [CHANGELOG.md](CHANGELOG.md) for details.
+          draft: false
+          prerelease: false
+          files: |
+            dist/YibanCheckin.dmg
+            .build/release/yiban-checkin

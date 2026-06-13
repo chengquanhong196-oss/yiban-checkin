@@ -1,0 +1,38 @@
+name: 易班晚点签到 (云备份)
+
+on:
+  schedule:
+    # 北京时间 21:30 = UTC 13:30
+    - cron: '30 13 * * *'
+  # 也允许手动触发
+  workflow_dispatch:
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip3 install cryptography requests
+
+      - name: 执行签到
+        env:
+          YIBAN_PHONE: ${{ secrets.YIBAN_PHONE }}
+          YIBAN_PASSWORD: ${{ secrets.YIBAN_PASSWORD }}
+          YIBAN_LAT: ${{ secrets.YIBAN_LAT }}
+          YIBAN_LNG: ${{ secrets.YIBAN_LNG }}
+          YIBAN_SCHOOL: ${{ secrets.YIBAN_SCHOOL }}
+          YIBAN_CAMPUS: ${{ secrets.YIBAN_CAMPUS }}
+          YIBAN_ACT: ${{ secrets.YIBAN_ACT }}
+          YIBAN_CLIENT_ID: ${{ secrets.YIBAN_CLIENT_ID }}
+          PUSH_KEY: ${{ secrets.PUSH_KEY }}
+        run: python3 scripts/cloud_checkin.py

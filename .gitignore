@@ -1,0 +1,51 @@
+# === Swift / SPM ===
+.build/
+.swiftpm/
+*.o
+*.d
+*.dia
+
+# === Xcode ===
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# === macOS ===
+.DS_Store
+*.dmg
+*.app
+
+# === Config / Secrets ===
+# NEVER commit real config files
+config.json
+*.env
+.env.*
+!server/.env.example
+
+# === Logs ===
+*.log
+*.log.*
+
+# === Python ===
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# === Server data ===
+server/data/
+*.db
+*.sqlite
+
+# === IDE ===
+.vscode/
+.idea/
+
+# === Temporary ===
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
