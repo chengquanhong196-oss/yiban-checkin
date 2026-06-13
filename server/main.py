@@ -18,6 +18,7 @@ Endpoints:
 import hashlib
 import logging
 import os
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -92,6 +93,12 @@ app.add_middleware(
 # === Web frontend ===
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+def _html(path):
+    try:
+        with open(f"static/{path}") as f:
+            return HTMLResponse(content=f.read())
+    except:
+        return HTMLResponse(content="<h1>Not Found</h1>")
 
 # WEB_COOKIE_NAME for browser sessions (separate from API Bearer)
 WEB_COOKIE_NAME = "yiban_session"
@@ -184,8 +191,8 @@ def web_index():
             return HTMLResponse(content=f.read())
     except:
         return HTMLResponse(content="<h1>Loading...</h1>")
-def web_login_page(request: Request):
-    return _html("login.html")  #  {"user": None})
+def web_login_page():
+    return RedirectResponse("/login?error=" + urllib.parse.quote("邮箱或密码错误"), status_code=302)
 
 
 @app.post("/login")
@@ -193,8 +200,7 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
                      db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
-        return _html("login.html")  # 
-            {"user": None, "error": "邮箱或密码错误"})
+        return RedirectResponse("/login?error=" + urllib.parse.quote("邮箱或密码错误"), status_code=302)
     token = create_access_token(user.id)
     resp = RedirectResponse("/dashboard", status_code=302)
     resp.set_cookie(WEB_COOKIE_NAME, token, max_age=JWT_EXPIRE_DAYS * 86400,
@@ -203,19 +209,17 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
 
 
 @app.get("/register", response_class=HTMLResponse)
-def web_register_page(request: Request):
-    return _html("register.html")  #  {"user": None})
+def web_register_page():
+    return RedirectResponse("/register?error=" + urllib.parse.quote("该邮箱已注册"), status_code=302)
 
 
 @app.post("/register")
 def web_register_submit(request: Request, email: str = Form(...), password: str = Form(...),
                         phone: str = Form(""), db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == email).first():
-        return _html("register.html")  # 
-            {"user": None, "error": "该邮箱已注册"})
+        return RedirectResponse("/register?error=" + urllib.parse.quote("该邮箱已注册"), status_code=302)
     if len(password) < 6:
-        return _html("register.html")  # 
-            {"user": None, "error": "密码至少 6 位"})
+        return RedirectResponse("/register?error=" + urllib.parse.quote("该邮箱已注册"), status_code=302)
 
     user = User(email=email, hashed_password=hash_password(password))
     if phone:
@@ -248,7 +252,6 @@ def web_dashboard(request: Request, user=Depends(require_web_user), db: Session 
         "email": user.email,
         "tier": user.tier,
         "tier_display": tier_map.get(user.tier, user.tier),
-        "subscription_active": subscription_active(user),
         "has_config": bool(user.yiban_config) and bool(config.get("phone")),
     }
 
@@ -293,10 +296,7 @@ def web_dashboard(request: Request, user=Depends(require_web_user), db: Session 
         CheckinLog.user_id == user.id
     ).order_by(CheckinLog.created_at.desc()).limit(20).all()
 
-    return templates.TemplateResponse("dashboard.html", {
-        "user": user, "profile": profile,
-        "stats": stats, "history": history,
-    })
+    return _html("dashboard.html")
 
 
 @app.post("/dashboard/checkin")
@@ -313,22 +313,8 @@ def web_trigger_checkin(request: Request, user=Depends(require_web_user), db: Se
 
 
 @app.get("/config", response_class=HTMLResponse)
-def web_config_page(request: Request, user=Depends(require_web_user)):
-    cfg = decrypt_config(user.yiban_config)
-    return templates.TemplateResponse("config.html", {
-        "user": user,
-        "config": {
-            "phone": cfg.get("phone", ""),
-            "password": cfg.get("password", ""),
-            "school": cfg.get("school", "福州大学"),
-            "campus": cfg.get("campus", "晋江"),
-            "lat": cfg.get("lat", 24.571),
-            "lng": cfg.get("lng", 118.617),
-            "act": cfg.get("act", "iapp7463"),
-            "client_id": cfg.get("client_id", "95626fa3080300ea"),
-            "push_key": user.push_key or "",
-        },
-    })
+def web_config_page(user=Depends(require_web_user)):
+    return _html("config.html")
 
 
 @app.post("/config")
@@ -351,12 +337,6 @@ def web_history(request: Request, user=Depends(require_web_user), db: Session = 
     logs = db.query(CheckinLog).filter(
         CheckinLog.user_id == user.id
     ).order_by(CheckinLog.created_at.desc()).limit(50).all()
-    return templates.TemplateResponse("dashboard.html", {
-        "user": user, "history": logs,
-        "profile": {"tier_display": user.tier, "subscription_active": False, "has_config": False},
-        "stats": {"today_success": 0, "today_attempts": 0, "month_success": 0, "month_total": 0, "streak": 0},
-    })
-
 
 # ============================================================
 # API Routes (macOS App 调用)
@@ -536,7 +516,6 @@ def detailed_health(admin_key: str, db: Session = Depends(get_db)):
     alerts = get_failure_alerts(db, hours=24)
     return {
         "status": "degraded" if alerts else "ok",
-        "stats": stats,
         "failure_alerts": alerts,
     }
 
