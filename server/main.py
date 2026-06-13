@@ -193,7 +193,7 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
         return templates.TemplateResponse("login.html",
-            {"request": request, "user": None, "error": "邮箱或密码错误"})
+            {"user": None, "error": "邮箱或密码错误"})
     token = create_access_token(user.id)
     resp = RedirectResponse("/dashboard", status_code=302)
     resp.set_cookie(WEB_COOKIE_NAME, token, max_age=JWT_EXPIRE_DAYS * 86400,
@@ -211,10 +211,10 @@ def web_register_submit(request: Request, email: str = Form(...), password: str 
                         phone: str = Form(""), db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == email).first():
         return templates.TemplateResponse("register.html",
-            {"request": request, "user": None, "error": "该邮箱已注册"})
+            {"user": None, "error": "该邮箱已注册"})
     if len(password) < 6:
         return templates.TemplateResponse("register.html",
-            {"request": request, "user": None, "error": "密码至少 6 位"})
+            {"user": None, "error": "密码至少 6 位"})
 
     user = User(email=email, hashed_password=hash_password(password))
     if phone:
@@ -293,7 +293,7 @@ def web_dashboard(request: Request, user=Depends(require_web_user), db: Session 
     ).order_by(CheckinLog.created_at.desc()).limit(20).all()
 
     return templates.TemplateResponse("dashboard.html", {
-        "request": request, "user": user, "profile": profile,
+        "user": user, "profile": profile,
         "stats": stats, "history": history,
     })
 
@@ -315,7 +315,7 @@ def web_trigger_checkin(request: Request, user=Depends(require_web_user), db: Se
 def web_config_page(request: Request, user=Depends(require_web_user)):
     cfg = decrypt_config(user.yiban_config)
     return templates.TemplateResponse("config.html", {
-        "request": request, "user": user,
+        "user": user,
         "config": {
             "phone": cfg.get("phone", ""),
             "password": cfg.get("password", ""),
@@ -351,7 +351,7 @@ def web_history(request: Request, user=Depends(require_web_user), db: Session = 
         CheckinLog.user_id == user.id
     ).order_by(CheckinLog.created_at.desc()).limit(50).all()
     return templates.TemplateResponse("dashboard.html", {
-        "request": request, "user": user, "history": logs,
+        "user": user, "history": logs,
         "profile": {"tier_display": user.tier, "subscription_active": False, "has_config": False},
         "stats": {"today_success": 0, "today_attempts": 0, "month_success": 0, "month_total": 0, "streak": 0},
     })
