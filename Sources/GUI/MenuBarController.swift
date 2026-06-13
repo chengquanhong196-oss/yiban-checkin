@@ -34,28 +34,35 @@ final class MenuBarController: ObservableObject {
     private func updateIcon() {
         guard let button = statusItem.button else { return }
         let symbol: String
+        let title: String
         let color: NSColor
 
         switch todayStatus {
         case "已签到":
-            symbol = "checkmark.circle.fill"
+            symbol = "checkmark.circle.fill"; title = "✓"
             color = .systemGreen
         case "签到失败":
-            symbol = "exclamationmark.circle.fill"
+            symbol = "exclamationmark.circle.fill"; title = "✗"
             color = .systemOrange
         case "签到中…":
-            symbol = "arrow.triangle.2.circlepath"
+            symbol = "arrow.triangle.2.circlepath"; title = "⟳"
             color = .systemBlue
         default:
-            symbol = "circle"
+            symbol = "circle"; title = "易"
             color = .secondaryLabelColor
         }
 
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: todayStatus)?
-            .withSymbolConfiguration(.init(pointSize: 15, weight: .medium))
-        image?.isTemplate = true
-        button.image = image
-        button.contentTintColor = color
+        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: todayStatus)?
+            .withSymbolConfiguration(.init(pointSize: 14, weight: .medium)) {
+            image.isTemplate = true
+            button.image = image
+            button.contentTintColor = color
+        }
+        button.attributedTitle = NSAttributedString(
+            string: " \(title) ",
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                         .foregroundColor: color]
+        )
         button.toolTip = "易班签到 — \(todayStatus)"
     }
 

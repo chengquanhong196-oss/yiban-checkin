@@ -11,6 +11,13 @@
   <img src="https://img.shields.io/badge/dependencies-zero-brightgreen" alt="dependencies">
 </p>
 
+<p align="center">
+  <img src="screenshots/dashboard.png" alt="Dashboard" width="45%">
+  <img src="screenshots/settings.png" alt="Settings" width="45%">
+  <br>
+  <img src="screenshots/onboarding.png" alt="Onboarding" width="45%">
+</p>
+
 ---
 
 ## 🇨🇳 中文说明 · 🇬🇧 [English](#english) below
