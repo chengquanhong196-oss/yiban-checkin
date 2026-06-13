@@ -201,6 +201,10 @@ class NotifyRequest(BaseModel):
 def admin_panel():
     return _html("admin.html")
 
+@app.get("/disclaimer", response_class=HTMLResponse)
+def disclaimer():
+    return _html("disclaimer.html")
+
 @app.get("/", response_class=HTMLResponse)
 def web_index():
     try:
