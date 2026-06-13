@@ -179,7 +179,7 @@ class NotifyRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def web_index(request: Request, user=Depends(get_web_user)):
-    return templates.TemplateResponse("index.html", {"request": request, "user": user})
+    return templates.TemplateResponse("index.html", {"user": user})
 
 
 @app.get("/login", response_class=HTMLResponse)
