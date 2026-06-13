@@ -218,7 +218,7 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
 
 @app.get("/register", response_class=HTMLResponse)
 def web_register_page():
-    return RedirectResponse("/register?error=" + urllib.parse.quote("该邮箱已注册"), status_code=302)
+    return _html("register.html")
 
 
 @app.post("/register")
