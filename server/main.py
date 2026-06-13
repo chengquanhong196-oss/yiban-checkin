@@ -195,6 +195,10 @@ def web_login_page():
     return RedirectResponse("/login?error=" + urllib.parse.quote("邮箱或密码错误"), status_code=302)
 
 
+@app.get("/login", response_class=HTMLResponse)
+def web_login_page():
+    return _html("login.html")
+
 @app.post("/login")
 def web_login_submit(request: Request, email: str = Form(...), password: str = Form(...),
                      db: Session = Depends(get_db)):
