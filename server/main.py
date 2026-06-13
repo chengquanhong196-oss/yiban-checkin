@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from jose import jwt
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from config import CHECKIN_HOUR, CHECKIN_MINUTE, AFDIAN_TOKEN, JWT_EXPIRE_DAYS, JWT_ALGORITHM
+from config import CHECKIN_HOUR, CHECKIN_MINUTE, AFDIAN_TOKEN, JWT_EXPIRE_DAYS, JWT_ALGORITHM, JWT_SECRET
 from models import init_db, get_db, User, CheckinLog
 from auth import (
     hash_password, verify_password, create_access_token,
@@ -104,8 +104,8 @@ def _html(path):
 WEB_COOKIE_NAME = "yiban_session"
 
 
-def get_web_user(request: Request, db: Session = Depends(get_db)):
-    """从 Cookie 中解析 JWT，返回 User。未登录返回 None（不抛异常）。"""
+def _web_user(request: Request, db: Session):
+    """从 Cookie 中解析 JWT，返回 User 或 None。"""
     token = request.cookies.get(WEB_COOKIE_NAME)
     if not token:
         return None
@@ -117,25 +117,13 @@ def get_web_user(request: Request, db: Session = Depends(get_db)):
         return None
 
 
-def require_web_user(request: Request, db: Session = Depends(get_db)):
-    """Web 页面专用 — 未登录重定向到登录页。也接受 token 参数。"""
-    user = get_web_user(request, db)
-    if not user:
-        # Check URL token
-        t = request.query_params.get("token")
-        if t:
-            try:
-                payload = jwt.decode(t, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-                user_id = int(payload.get("sub"))
-                user = db.query(User).filter(User.id == user_id).first()
-            except:
-                pass
-    if not user:
-        raise HTTPException(status_code=302, headers={"Location": "/login"})
-    # Set cookie for subsequent requests
-    if t:
-        from fastapi.responses import Response as _Resp
-    return user
+def _require_web(request: Request, db: Session):
+    """Web 页面认证。返回 (user, error_redirect)。
+    如果 error_redirect 不为 None，调用者应直接 return 它。"""
+    user = _web_user(request, db)
+    if user:
+        return user, None
+    return None, RedirectResponse("/login?need_login=1", status_code=302)
 
 # ============================================================
 # Schemas
@@ -212,10 +200,6 @@ def web_index():
             return HTMLResponse(content=f.read())
     except:
         return HTMLResponse(content="<h1>Loading...</h1>")
-def web_login_page():
-    return RedirectResponse("/login?error=" + urllib.parse.quote("邮箱或密码错误"), status_code=302)
-
-
 @app.get("/login", response_class=HTMLResponse)
 def web_login_page():
     return _html("login.html")
@@ -227,7 +211,7 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
     if not user or not verify_password(password, user.hashed_password):
         return RedirectResponse("/login?error=" + urllib.parse.quote("邮箱或密码错误"), status_code=302)
     token = create_access_token(user.id)
-    return HTMLResponse(content=f"<h1>登录成功</h1><p>{user.email}</p><a href=\"/dashboard\">进入控制台</a>", headers={"Set-Cookie": f"yiban_session={token}; Path=/; Max-Age=2592000; HttpOnly"})
+    resp = RedirectResponse("/dashboard", status_code=302)
     resp.set_cookie(WEB_COOKIE_NAME, token, max_age=JWT_EXPIRE_DAYS * 86400,
                     httponly=True, samesite="lax")
     return resp
@@ -244,7 +228,7 @@ def web_register_submit(request: Request, email: str = Form(...), password: str 
     if db.query(User).filter(User.email == email).first():
         return RedirectResponse("/register?error=" + urllib.parse.quote("该邮箱已注册"), status_code=302)
     if len(password) < 6:
-        return RedirectResponse("/register?error=" + urllib.parse.quote("该邮箱已注册"), status_code=302)
+        return RedirectResponse("/register?error=" + urllib.parse.quote("密码至少 6 位"), status_code=302)
 
     user = User(email=email, hashed_password=hash_password(password))
     if phone:
@@ -253,7 +237,7 @@ def web_register_submit(request: Request, email: str = Form(...), password: str 
     db.add(user)
     db.commit()
     token = create_access_token(user.id)
-    return HTMLResponse(content=f"<h1>登录成功</h1><p>{user.email}</p><a href=\"/dashboard\">进入控制台</a>", headers={"Set-Cookie": f"yiban_session={token}; Path=/; Max-Age=2592000; HttpOnly"})
+    resp = RedirectResponse("/dashboard", status_code=302)
     resp.set_cookie(WEB_COOKIE_NAME, token, max_age=JWT_EXPIRE_DAYS * 86400,
                     httponly=True, samesite="lax")
     return resp
@@ -267,20 +251,18 @@ def web_logout():
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def web_dashboard(request: Request, user=Depends(require_web_user), db: Session = Depends(get_db)):
+def web_dashboard(request: Request, db: Session = Depends(get_db)):
+    user, err = _require_web(request, db)
+    if err:
+        return err
+
     config = decrypt_config(user.yiban_config)
-    from auth import subscription_active
-    from monitor import get_daily_stats
-
     tier_map = {"free": "免费", "monthly": "月付", "yearly": "年付", "lifetime": "永久"}
-    profile = {
-        "email": user.email,
-        "tier": user.tier,
-        "tier_display": tier_map.get(user.tier, user.tier),
-        "has_config": bool(user.yiban_config) and bool(config.get("phone")),
-    }
+    tier_display = tier_map.get(user.tier, user.tier)
+    has_config = bool(user.yiban_config) and bool(config.get("phone"))
+    sub_active = subscription_active(user)
 
-    # 获取用户自己的签到统计
+    # 签到统计
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_logs = db.query(CheckinLog).filter(
         CheckinLog.user_id == user.id, CheckinLog.created_at >= today
@@ -298,70 +280,183 @@ def web_dashboard(request: Request, user=Depends(require_web_user), db: Session 
         if d not in logs_by_date or log.success:
             logs_by_date[d] = log.success
     check_date = today
-    while True:
+    for _ in range(31):
         d = check_date.strftime("%Y-%m-%d")
         if logs_by_date.get(d):
             streak += 1
             check_date -= timedelta(days=1)
-        elif d == today.strftime("%Y-%m-%d"):
-            check_date -= timedelta(days=1)
-            continue
         else:
             break
 
-    stats = {
-        "today_success": sum(1 for l in today_logs if l.success),
-        "today_attempts": len(today_logs),
-        "month_success": sum(1 for l in month_logs if l.success),
-        "month_total": today.day,
-        "streak": streak,
-    }
+    today_success = sum(1 for l in today_logs if l.success)
+    month_success = sum(1 for l in month_logs if l.success)
 
-    history = db.query(CheckinLog).filter(
+    history_rows = ""
+    history_logs = db.query(CheckinLog).filter(
         CheckinLog.user_id == user.id
     ).order_by(CheckinLog.created_at.desc()).limit(20).all()
+    for l in history_logs:
+        icon = "✅" if l.success else "❌"
+        t = l.created_at.strftime("%m-%d %H:%M")
+        msg = l.message[:40] if l.message else ""
+        history_rows += f'<tr><td>{icon}</td><td>{t}</td><td>{l.method}</td><td>{msg}</td></tr>'
 
-    return _html("dashboard.html")
+    # 获取页面消息
+    success_msg = request.query_params.get("success", "")
+    error_msg = request.query_params.get("error", "")
+    msg_html = ""
+    if success_msg:
+        msg_html = f'<div style="background:#d4edda;color:#155724;padding:10px 16px;border-radius:8px;margin-bottom:16px">{success_msg}</div>'
+    if error_msg:
+        msg_html = f'<div style="background:#f8d7da;color:#721c24;padding:10px 16px;border-radius:8px;margin-bottom:16px">{error_msg}</div>'
+
+    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>控制台</title>
+<style>body{{font-family:-apple-system,sans-serif;background:#f5f5f7;max-width:800px;margin:0 auto;padding:40px 24px;color:#1d1d1f}}
+.card{{background:#fff;border-radius:14px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin:16px 0}}
+h1{{font-size:28px;margin-bottom:4px}}.email{{color:#888;font-size:14px;margin-bottom:16px}}
+.badge{{display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600}}
+.badge-pro{{background:#007aff;color:#fff}}.badge-free{{background:#e5e5ea;color:#666}}
+.stats{{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}}
+.stat{{flex:1;min-width:80px;background:#f5f5f7;border-radius:10px;padding:14px;text-align:center}}
+.stat .n{{font-size:24px;font-weight:700;color:#007aff}}.stat .l{{font-size:11px;color:#888;margin-top:2px}}
+.btn{{display:inline-block;padding:10px 22px;border-radius:8px;text-decoration:none;font-weight:600;margin:8px 8px 8px 0;font-size:15px;cursor:pointer}}
+.btn-p{{background:#007aff;color:#fff;border:none}}.btn-o{{color:#007aff;border:1px solid #007aff;background:#fff}}
+.nav{{display:flex;gap:16px;margin-bottom:20px}}.nav a{{color:#007aff;text-decoration:none;font-size:14px}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}td,th{{padding:8px 12px;border-bottom:1px solid #f0f0f0;text-align:left}}
+footer{{text-align:center;padding:24px;font-size:12px;color:#aaa;border-top:1px solid #e5e5e5;margin-top:32px}}
+</style></head>
+<body><div class=nav><a href=/>首页</a><a href=/config>配置</a><a href=/logout>退出</a></div>
+<h1>控制台</h1><p class=email>{user.email} <span class="badge {'badge-pro' if sub_active else 'badge-free'}">{tier_display}{' (有效)' if sub_active else ''}</span></p>
+{msg_html}
+<div class=stats>
+<div class=stat><div class=n>{today_success}</div><div class=l>今日签到</div></div>
+<div class=stat><div class=n>{month_success}</div><div class=l>本月签到</div></div>
+<div class=stat><div class=n>{streak}</div><div class=l>连续签到</div></div>
+</div>
+<div class=card>
+<h3>签到操作</h3>
+<p style="color:#888;font-size:13px;margin-bottom:12px">{'已配置签到信息' if has_config else '⚠️ 尚未配置签到信息，请先配置'}</p>
+<form method=POST action=/dashboard/checkin style=display:inline><button type=submit class="btn btn-p">🔄 立即云签到</button></form>
+<a href=/config class="btn btn-o">📝 签到配置</a>
+</div>
+<div class=card><h3>签到记录</h3>
+<table><tr><th></th><th>时间</th><th>方式</th><th>消息</th></tr>{history_rows}</table>
+</div>
+<footer>yiban-checkin · 云签到服务</footer></body></html>"""
+    return HTMLResponse(content=html)
 
 
 @app.post("/dashboard/checkin")
-def web_trigger_checkin(request: Request, user=Depends(require_web_user), db: Session = Depends(get_db)):
+def web_trigger_checkin(request: Request, db: Session = Depends(get_db)):
+    user, err = _require_web(request, db)
+    if err:
+        return err
     if not user.yiban_config:
         return RedirectResponse("/config?error=请先配置签到信息", status_code=302)
     from checkin_worker import run_checkin_for_user
     log = run_checkin_for_user(user)
     db.add(log)
     db.commit()
-    success_msg = "签到成功" if log.success else None
-    error_msg = None if log.success else log.message
-    return RedirectResponse(f"/dashboard?{'success=' + success_msg if success_msg else 'error=' + error_msg}", status_code=302)
+    if log.success:
+        return RedirectResponse("/dashboard?success=" + urllib.parse.quote("签到成功"), status_code=302)
+    else:
+        return RedirectResponse("/dashboard?error=" + urllib.parse.quote(log.message or "签到失败"), status_code=302)
 
 
 @app.get("/config", response_class=HTMLResponse)
-def web_config_page(user=Depends(require_web_user)):
-    return _html("config.html")
+def web_config_page(request: Request, db: Session = Depends(get_db)):
+    user, err = _require_web(request, db)
+    if err:
+        return err
+    # Pre-fill existing config
+    config = decrypt_config(user.yiban_config) if user.yiban_config else {}
+    phone = config.get("phone", "")
+    school = config.get("school", "")
+    campus = config.get("campus", "")
+    lat = config.get("lat", 0.0)
+    lng = config.get("lng", 0.0)
+    act = config.get("act", "")
+    client_id = config.get("client_id", "")
+
+    error_msg = request.query_params.get("error", "")
+    err_html = f'<div style="background:#f8d7da;color:#721c24;padding:10px 16px;border-radius:8px;margin-bottom:16px">{error_msg}</div>' if error_msg else ""
+
+    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>签到配置</title>
+<style>body{{font-family:-apple-system,sans-serif;background:#f5f5f7;max-width:600px;margin:0 auto;padding:40px 24px}}
+.card{{background:#fff;border-radius:14px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.06)}}h1{{font-size:28px}}
+label{{display:block;font-size:13px;font-weight:600;color:#555;margin:12px 0 4px}}
+input{{width:100%;padding:10px 12px;border:1px solid #d2d2d7;border-radius:8px;font-size:15px;box-sizing:border-box}}
+input:focus{{outline:none;border-color:#007aff}}.row{{display:flex;gap:12px}}.row div{{flex:1}}
+button{{width:100%;padding:12px;background:#007aff;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;margin-top:20px}}
+.nav{{display:flex;gap:16px;margin-bottom:20px}}.nav a{{color:#007aff;text-decoration:none;font-size:14px}}
+.hint{{font-size:12px;color:#999;margin-top:2px}}.hint a{{color:#007aff}}
+</style></head>
+<body><div class=nav><a href=/>首页</a><a href=/dashboard>控制台</a><a href=/logout>退出</a></div>
+<h1>签到配置</h1><p style="color:#888;margin-bottom:16px">加密存储于服务器，仅用于每日自动签到</p>
+{err_html}
+<div class=card>
+<form method=POST action=/config>
+<label>易班手机号</label><input name=phone placeholder="11位手机号" value="{phone}" required>
+<label>易班密码</label><input type=password name=password placeholder="易班密码" required>
+<label>学校</label><input name=school placeholder="福州大学" value="{school}" required>
+<div class=row><div><label>校区</label><input name=campus placeholder="晋江" value="{campus}"></div></div>
+<div class=row><div><label>纬度</label><input name=lat value="{lat}" type=number step=0.001 required></div><div><label>经度</label><input name=lng value="{lng}" type=number step=0.001 required></div></div>
+<label>校本化 App ID</label><input name=act placeholder="iapp7463" value="{act}" required>
+<label>OAuth Client ID</label><input name=client_id placeholder="95626fa3080300ea" value="{client_id}" required>
+<label>Server酱 SendKey</label><input name=push_key placeholder="留空不推送">
+<p class=hint>去 <a href="https://sct.ftqq.com" target=_blank>sct.ftqq.com</a> 获取</p>
+<button type=submit>💾 保存</button>
+</form></div>
+</body></html>"""
+    return HTMLResponse(content=html)
 
 
 @app.post("/config")
-def web_config_save(request: Request, user=Depends(require_web_user), db: Session = Depends(get_db),
+def web_config_save(request: Request, db: Session = Depends(get_db),
                     phone: str = Form(...), password: str = Form(...),
-                    school: str = Form("福州大学"), campus: str = Form("晋江"),
-                    lat: float = Form(24.571), lng: float = Form(118.617),
-                    act: str = Form("iapp7463"), client_id: str = Form("95626fa3080300ea"),
+                    school: str = Form(""), campus: str = Form(""),
+                    lat: float = Form(0.0), lng: float = Form(0.0),
+                    act: str = Form(""), client_id: str = Form(""),
                     push_key: str = Form("")):
+    user, err = _require_web(request, db)
+    if err:
+        return err
     config = {"phone": phone, "password": password, "school": school, "campus": campus,
               "lat": lat, "lng": lng, "act": act, "client_id": client_id}
     user.yiban_config = encrypt_config(config)
     user.push_key = push_key
     db.commit()
-    return RedirectResponse("/dashboard?success=配置已保存", status_code=302)
+    return RedirectResponse("/dashboard?success=" + urllib.parse.quote("配置已保存"), status_code=302)
 
 
 @app.get("/history", response_class=HTMLResponse)
-def web_history(request: Request, user=Depends(require_web_user), db: Session = Depends(get_db)):
+def web_history(request: Request, db: Session = Depends(get_db)):
+    user, err = _require_web(request, db)
+    if err:
+        return err
     logs = db.query(CheckinLog).filter(
         CheckinLog.user_id == user.id
     ).order_by(CheckinLog.created_at.desc()).limit(50).all()
+
+    rows = ""
+    for l in logs:
+        icon = "✅" if l.success else "❌"
+        t = l.created_at.strftime("%Y-%m-%d %H:%M")
+        msg = (l.message or "")[:60]
+        rows += f'<tr><td>{icon}</td><td>{t}</td><td>{l.method}</td><td>{msg}</td></tr>'
+
+    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>签到记录</title>
+<style>body{{font-family:-apple-system,sans-serif;background:#f5f5f7;max-width:800px;margin:0 auto;padding:40px 24px}}
+.card{{background:#fff;border-radius:14px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin:16px 0}}
+h1{{font-size:28px}}table{{width:100%;border-collapse:collapse;font-size:14px}}
+td,th{{padding:10px 14px;border-bottom:1px solid #f0f0f0;text-align:left}}
+.nav{{display:flex;gap:16px;margin-bottom:20px}}.nav a{{color:#007aff;text-decoration:none;font-size:14px}}
+</style></head>
+<body><div class=nav><a href=/>首页</a><a href=/dashboard>控制台</a><a href=/logout>退出</a></div>
+<h1>签到记录</h1><div class=card>
+<table><tr><th></th><th>时间</th><th>方式</th><th>消息</th></tr>{rows}</table>
+</div></body></html>"""
+    return HTMLResponse(content=html)
 
 # ============================================================
 # API Routes (macOS App 调用)
