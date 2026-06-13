@@ -12,10 +12,13 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/dashboard.png" alt="Dashboard" width="45%">
-  <img src="screenshots/settings.png" alt="Settings" width="45%">
-  <br>
-  <img src="screenshots/onboarding.png" alt="Onboarding" width="45%">
+  <img src="screenshots/dashboard.png" alt="Dashboard" width="70%">
+</p>
+<p align="center">
+  <img src="screenshots/settings.png" alt="Settings" width="70%">
+</p>
+<p align="center">
+  <img src="screenshots/onboarding.png" alt="Onboarding" width="70%">
 </p>
 
 ---
