@@ -75,5 +75,12 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
             ]
         ),
+
+        // 测试
+        .testTarget(
+            name: "YibanCheckinTests",
+            dependencies: ["YibanCheckinCore"],
+            path: "Tests/YibanCheckinTests"
+        ),
     ]
 )

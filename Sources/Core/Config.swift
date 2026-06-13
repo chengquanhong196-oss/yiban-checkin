@@ -12,6 +12,10 @@ public struct Config: Codable {
     public var yibanAct: String = "iapp7463"
     /// OAuth 客户端 ID（与 act 配套）
     public var yibanClientId: String = "95626fa3080300ea"
+    /// OCR 导航按钮文字（不同学校易班首页布局不同）
+    public var ocrSchoolButton: String = "我的学校"
+    public var ocrPortalButton: String = "校本化"
+    public var ocrCheckinButton: String = "晚点签到"
     public var locationTimeout: TimeInterval = 15
     public var uiTimeout: TimeInterval = 10
     public var stepDelay: TimeInterval = 2
@@ -55,6 +59,7 @@ public struct Config: Codable {
 
     enum CodingKeys: String, CodingKey {
         case yibanBundleID, schoolName, campusName, yibanAct, yibanClientId
+        case ocrSchoolButton, ocrPortalButton, ocrCheckinButton
         case campusLatitude, campusLongitude, radiusMeters
         case locationTimeout, uiTimeout, stepDelay, maxRetries
         case logLevel, yibanUsername, checkinMethod

@@ -647,9 +647,9 @@ public final class AppAutomator {
 
     public func enterMySchool(inWindow frame: CGRect) throws {
         _ = dismissAnyDialog(inWindow: frame)
-        Logger.info("正在点击「我的学校」...")
-        guard let point = findText("我的学校", inWindow: frame) else {
-            throw AppError.elementNotFound("我的学校")
+        Logger.info("正在点击「\(config.ocrSchoolButton)」...")
+        guard let point = findText(config.ocrSchoolButton, inWindow: frame) else {
+            throw AppError.elementNotFound(config.ocrSchoolButton)
         }
         click(at: point)
         Logger.success("已点击「我的学校」")
@@ -660,9 +660,9 @@ public final class AppAutomator {
 
     public func enterSchoolPortal(inWindow frame: CGRect) throws {
         _ = dismissAnyDialog(inWindow: frame)
-        Logger.info("正在点击「校本化」图标...")
-        guard clickIcon(forText: "校本化", inWindow: frame, yOffset: -30) else {
-            throw AppError.elementNotFound("校本化")
+        Logger.info("正在点击「\(config.ocrPortalButton)」图标...")
+        guard clickIcon(forText: config.ocrPortalButton, inWindow: frame, yOffset: -30) else {
+            throw AppError.elementNotFound(config.ocrPortalButton)
         }
         Logger.success("已进入校本化")
         Thread.sleep(forTimeInterval: 2)
@@ -672,9 +672,9 @@ public final class AppAutomator {
 
     public func enterEveningCheckin(inWindow frame: CGRect) throws {
         _ = dismissAnyDialog(inWindow: frame)
-        Logger.info("正在点击「晚点签到」图标...")
-        guard clickIcon(forText: "晚点签到", inWindow: frame, yOffset: -30) else {
-            throw AppError.elementNotFound("晚点签到")
+        Logger.info("正在点击「\(config.ocrCheckinButton)」图标...")
+        guard clickIcon(forText: config.ocrCheckinButton, inWindow: frame, yOffset: -30) else {
+            throw AppError.elementNotFound(config.ocrCheckinButton)
         }
         Logger.success("已进入晚点签到")
         Thread.sleep(forTimeInterval: 1)

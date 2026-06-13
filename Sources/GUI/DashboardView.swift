@@ -8,9 +8,9 @@ struct DashboardView: View {
     @State private var todayStatus: String = "检查中..."
     @State private var countdown: String = "--:--:--"
     @State private var countdownColor: Color = .secondary
-    @State private var checkinMethod: String = Config.load().checkinMethod
-    @State private var schoolName: String = Config.load().schoolName
-    @State private var campusName: String = Config.load().campusName
+    @State private var checkinMethod: String = "auto"
+    @State private var schoolName: String = ""
+    @State private var campusName: String = ""
     @State private var showSchoolSheet = false
     @State private var showStats = false
 
@@ -277,67 +277,52 @@ struct WeekStrip: View {
 // MARK: - Diagnostic Panel
 
 struct DiagnosticPanel: View {
-    @State private var diagnostics: PermissionChecker.DiagnosticResult?
+    @State private var result: PermissionChecker.DiagnosticResult?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: allOK ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                    .font(.system(size: 14)).foregroundColor(allOK ? .green : .orange)
-                Text(allOK ? "一切就绪" : "\(badCount) 项待处理")
+                Image(systemName: statusIcon)
+                    .font(.system(size: 14)).foregroundColor(statusColor)
+                Text(statusText)
                     .font(.callout).fontWeight(.medium).foregroundColor(.secondary)
                 Spacer()
+                Button("检测") { check() }
+                    .buttonStyle(.bordered).controlSize(.small)
             }
 
-            if let d = diagnostics {
-                VStack(spacing: 2) {
-                    DiagRow(ok: d.locationOK, label: "定位权限",
-                            fix: "开启…", fixAction: { PermissionChecker.openLocationSettings() })
-                    DiagRow(ok: d.canLaunchApp, label: "易班已安装",
-                            fix: "安装", fixAction: { NSWorkspace.shared.open(URL(string: "https://apps.apple.com/cn/app/id1146968687")!) })
-                    DiagRow(ok: d.accessibilityOK, label: "辅助功能权限",
-                            fix: "授权", fixAction: { PermissionChecker.requestAccessibilityPermission() })
-                    DiagRow(ok: d.configOK, label: "账号配置",
-                            fix: "设置", fixAction: {
-                                NotificationCenter.default.post(name: .openSettings, object: nil)
-                            })
-                }
+            if let r = result {
+                DiagRow(ok: r.locationOK, label: "定位权限",
+                        fix: "开启…", fixAction: { PermissionChecker.openLocationSettings() })
+                DiagRow(ok: r.canLaunchApp, label: "易班已安装",
+                        fix: "安装", fixAction: { NSWorkspace.shared.open(URL(string: "https://apps.apple.com/cn/app/id1146968687")!) })
+                DiagRow(ok: r.accessibilityOK, label: "辅助功能权限",
+                        fix: "授权", fixAction: { PermissionChecker.requestAccessibilityPermission() })
+                DiagRow(ok: r.configOK, label: "账号配置",
+                        fix: "设置", fixAction: { NotificationCenter.default.post(name: .openSettings, object: nil) })
             }
         }
         .padding(14)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .onAppear { refreshDiag() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refreshDiag()
-        }
     }
 
-    private func refreshDiag() { diagnostics = PermissionChecker.runDiagnostics(config: Config.load()) }
-
-    private var allOK: Bool {
-        guard let d = diagnostics else { return true }
-        return d.accessibilityOK && d.locationOK && d.configOK && d.canLaunchApp
+    private func check() {
+        result = PermissionChecker.runDiagnostics(config: Config.load())
     }
-    private var badCount: Int {
-        guard let d = diagnostics else { return 0 }
-        return [d.accessibilityOK, d.locationOK, d.configOK, d.canLaunchApp].filter { !$0 }.count
-    }
-}
 
-struct DiagRow: View {
-    let ok: Bool; let label: String; let fix: String; let fixAction: () -> Void
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 13)).foregroundColor(ok ? .green : .secondary.opacity(0.3))
-            Text(label).font(.callout).foregroundColor(ok ? .secondary : .primary)
-            Spacer()
-            if !ok {
-                Button(fix) { fixAction() }.buttonStyle(.bordered).controlSize(.small)
-            }
-        }
-        .padding(.vertical, 4)
+    private var statusIcon: String {
+        guard let r = result else { return "circle.dotted" }
+        return (r.accessibilityOK && r.locationOK && r.configOK && r.canLaunchApp) ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+    }
+    private var statusColor: Color {
+        guard let r = result else { return .secondary }
+        return (r.accessibilityOK && r.locationOK && r.configOK && r.canLaunchApp) ? .green : .orange
+    }
+    private var statusText: String {
+        guard let r = result else { return "点击检测系统状态" }
+        let bad = [r.accessibilityOK, r.locationOK, r.configOK, r.canLaunchApp].filter { !$0 }.count
+        return bad == 0 ? "一切就绪" : "\(bad) 项待处理"
     }
 }
 
@@ -393,5 +378,23 @@ extension CheckinManager.CheckinResult {
     }
     var color: Color {
         switch self { case .success: return .green; case .failure: return .orange; case .skipped: return .secondary }
+    }
+}
+
+// MARK: - Mini Helpers
+
+struct DiagRow: View {
+    let ok: Bool; let label: String; let fix: String; let fixAction: () -> Void
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 13)).foregroundColor(ok ? .green : .secondary.opacity(0.3))
+            Text(label).font(.callout).foregroundColor(ok ? .secondary : .primary)
+            Spacer()
+            if !ok {
+                Button(fix) { fixAction() }.buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

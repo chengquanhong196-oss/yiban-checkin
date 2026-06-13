@@ -74,10 +74,10 @@ struct LocalAccountSection: View {
             Label("本地账号", systemImage: "person.fill").font(.headline).padding(.horizontal, 24)
 
             VStack(spacing: 10) {
-                LabeledField("手机号") { TextField("", text: $config.yibanUsername).textFieldStyle(.roundedBorder) }
+                LabeledField("手机号") { TextField("", text: $config.yibanUsername).textFieldStyle(.roundedBorder).onChange(of: config.yibanUsername) { _ in config.save() } }
                 LabeledField("密码") { SecureField("", text: Binding(
                     get: { config.yibanPassword },
-                    set: { config.yibanPassword = $0 }
+                    set: { config.yibanPassword = $0; config.save() }
                 )).textFieldStyle(.roundedBorder) }
                 Text("密码通过 Keychain 安全存储，不上传").font(.caption2).foregroundColor(.secondary)
             }
@@ -97,8 +97,7 @@ struct LocalAccountSection: View {
             }
             .padding(.horizontal, 24)
 
-            Button("保存本地配置") { config.save() }
-                .buttonStyle(.bordered).controlSize(.small)
+            Text("修改后自动保存").font(.caption).foregroundColor(.secondary)
                 .padding(.horizontal, 24)
         }
     }
@@ -124,7 +123,6 @@ struct CloudAccountSection: View {
                     }
                     Spacer()
                     Button("退出", role: .destructive) { cloud.logout() }
-                        .buttonStyle(.bordered).controlSize(.small)
                 }
                 .padding(.horizontal, 24)
             } else {
@@ -139,7 +137,6 @@ struct CloudAccountSection: View {
                             Button("保存") {
                                 UserDefaults.standard.set(serverURL, forKey: "cloud_server_url")
                             }
-                            .buttonStyle(.bordered).controlSize(.small)
                         }
                     }
 
@@ -161,7 +158,6 @@ struct CloudAccountSection: View {
                         Button("注册") {
                             Task { _ = try? await cloud.register(email: email, password: password) }
                         }
-                        .buttonStyle(.bordered).controlSize(.small)
                         .disabled(email.isEmpty || password.count < 6)
                     }
 
