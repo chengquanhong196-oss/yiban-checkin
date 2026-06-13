@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from jose import jwt
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from config import CHECKIN_HOUR, CHECKIN_MINUTE, AFDIAN_TOKEN
+from config import CHECKIN_HOUR, CHECKIN_MINUTE, AFDIAN_TOKEN, JWT_EXPIRE_DAYS, JWT_ALGORITHM
 from models import init_db, get_db, User, CheckinLog
 from auth import (
     hash_password, verify_password, create_access_token,
