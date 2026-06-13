@@ -118,10 +118,23 @@ def get_web_user(request: Request, db: Session = Depends(get_db)):
 
 
 def require_web_user(request: Request, db: Session = Depends(get_db)):
-    """Web 页面专用 — 未登录重定向到登录页。"""
+    """Web 页面专用 — 未登录重定向到登录页。也接受 token 参数。"""
     user = get_web_user(request, db)
     if not user:
+        # Check URL token
+        t = request.query_params.get("token")
+        if t:
+            try:
+                payload = jwt.decode(t, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                user_id = int(payload.get("sub"))
+                user = db.query(User).filter(User.id == user_id).first()
+            except:
+                pass
+    if not user:
         raise HTTPException(status_code=302, headers={"Location": "/login"})
+    # Set cookie for subsequent requests
+    if t:
+        from fastapi.responses import Response as _Resp
     return user
 
 # ============================================================
