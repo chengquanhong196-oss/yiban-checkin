@@ -210,7 +210,7 @@ def web_login_submit(request: Request, email: str = Form(...), password: str = F
     if not user or not verify_password(password, user.hashed_password):
         return RedirectResponse("/login?error=" + urllib.parse.quote("邮箱或密码错误"), status_code=302)
     token = create_access_token(user.id)
-    resp = RedirectResponse("/dashboard", status_code=302)
+    return HTMLResponse(content=f"<h1>登录成功</h1><p>{user.email}</p><a href=\"/dashboard\">进入控制台</a>", headers={"Set-Cookie": f"yiban_session={token}; Path=/; Max-Age=2592000; HttpOnly"})
     resp.set_cookie(WEB_COOKIE_NAME, token, max_age=JWT_EXPIRE_DAYS * 86400,
                     httponly=True, samesite="lax")
     return resp
@@ -236,7 +236,7 @@ def web_register_submit(request: Request, email: str = Form(...), password: str 
     db.add(user)
     db.commit()
     token = create_access_token(user.id)
-    resp = RedirectResponse("/dashboard", status_code=302)
+    return HTMLResponse(content=f"<h1>登录成功</h1><p>{user.email}</p><a href=\"/dashboard\">进入控制台</a>", headers={"Set-Cookie": f"yiban_session={token}; Path=/; Max-Age=2592000; HttpOnly"})
     resp.set_cookie(WEB_COOKIE_NAME, token, max_age=JWT_EXPIRE_DAYS * 86400,
                     httponly=True, samesite="lax")
     return resp
