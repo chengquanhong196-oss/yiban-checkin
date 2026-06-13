@@ -187,6 +187,211 @@ body{font-family:-apple-system,sans-serif;background:#f5f5f7;margin:0;padding:40
 h1{font-size:40px;margin:40px 0 8px}.sub{color:#666;margin-bottom:32px}
 .btn{display:inline-block;padding:12px 32px;border-radius:8px;font-size:16px;font-weight:600;text-decoration:none;margin:8px}
 .btn-p{background:#007aff;color:#fff}.btn-o{color:#007aff;border:1px solid #007aff}
+.pricing{display:flex;justify-content:center;gap:20px;flex-wrap:wrap;margin:40px 0;max-width:900px;margin-left:auto;margin-right:auto}
+.card{background:#fff;border-radius:16px;padding:28px 20px;width:240px;box-shadow:0 1px 3px rgba(0,0,0,.06);flex-shrink:0}
+.card.featured{border:2px solid #007aff}
+.price{font-size:36px;font-weight:800;color:#007aff}.price span{font-size:14px;color:#888}
+ul{list-style:none;padding:0;margin:12px 0;text-align:left}li{padding:4px 0;font-size:13px;color:#555}li:before{content:"✓ ";color:#34c759;font-weight:bold}
+</style></head>
+<body>
+<h1>&#x2601;&#xFE0F; 易班云签到</h1>
+<p class="sub">Mac 关机也能自动签到 · 每天 21:30 · 微信通知</p>
+<div><a href="/register" class="btn btn-p">免费注册</a><a href="/login" class="btn btn-o">已有账号？登录</a></div>
+<div class="pricing">
+<div class="card"><h3>免费</h3><div class="price">¥0</div><ul><li>本地签到</li><li>手动签到</li></ul><a href="/register" class="btn btn-o">开始使用</a></div>
+<div class="card featured"><h3>月付</h3><div class="price">¥6.9<span>/月</span></div><ul><li>每日自动签到</li><li>Mac 关机也能签</li><li>微信通知</li></ul><a href="https://afdian.com/a/yiban-checkin" class="btn btn-p">升级会员</a></div>
+<div class="card"><h3>年付</h3><div class="price">¥49<span>/年</span></div><ul><li>月付全部权益</li><li>合 ¥4.1/月</li></ul><a href="https://afdian.com/a/yiban-checkin" class="btn btn-p">升级会员</a></div>
+</div>
+<p style="color:#aaa;margin-top:40px">yiban-checkin · 仅供学习交流</p>
+</body></html>''')"
+yiban-checkin Cloud Service — FastAPI Backend
+
+Endpoints:
+  POST /api/register          — Create account (with phone)
+  POST /api/login             — Login → JWT
+  GET  /api/me                — User profile + subscription
+  PUT  /api/me/config         — Update yiban credentials
+  GET  /api/me/history        — Check-in history
+  POST /api/me/checkin        — Trigger immediate check-in
+  POST /api/me/payment-link   — Generate 爱发电 payment link
+  GET  /api/health            — Basic health check
+  GET  /api/health/detailed   — Detailed stats (admin)
+  POST /api/webhook/afdian    — 爱发电 payment webhook
+  POST /api/admin/notify      — Broadcast notification to paid users
+"""
+
+import hashlib
+import logging
+import os
+from datetime import datetime, timezone, timedelta
+from contextlib import asynccontextmanager
+from typing import Optional
+
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Form, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from jose import jwt
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from config import CHECKIN_HOUR, CHECKIN_MINUTE, AFDIAN_TOKEN
+from models import init_db, get_db, User, CheckinLog
+from auth import (
+    hash_password, verify_password, create_access_token,
+    get_current_user, encrypt_config, decrypt_config, subscription_active,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("server")
+
+# ============================================================
+# Startup / Scheduler
+# ============================================================
+
+scheduler = BackgroundScheduler()
+
+
+def scheduled_checkin():
+    from checkin_worker import run_daily_checkin
+    run_daily_checkin()
+
+
+def scheduled_monitor():
+    from monitor import check_and_alert
+    check_and_alert()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 安全检查
+    from config import JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY
+    if not JWT_SECRET:
+        logger.error("❌ JWT_SECRET 未设置！服务器拒绝启动。请在环境变量中设置 JWT_SECRET")
+        raise RuntimeError("JWT_SECRET is required")
+    if not CREDENTIAL_ENCRYPTION_KEY:
+        logger.error("❌ CREDENTIAL_ENCRYPTION_KEY 未设置！服务器拒绝启动。请设置 CREDENTIAL_ENCRYPTION_KEY")
+        raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY is required")
+
+    init_db()
+    scheduler.add_job(scheduled_checkin, "cron", hour=CHECKIN_HOUR, minute=CHECKIN_MINUTE,
+                      timezone="Asia/Shanghai")
+    scheduler.add_job(scheduled_monitor, "cron", hour=22, minute=30, timezone="Asia/Shanghai")
+    scheduler.start()
+    logger.info(f"每日签到: {CHECKIN_HOUR}:{CHECKIN_MINUTE:02d} CST | 每日告警: 22:30 CST")
+    yield
+    scheduler.shutdown()
+
+
+app = FastAPI(title="yiban-checkin Cloud", version="2.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# === Web frontend ===
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+# WEB_COOKIE_NAME for browser sessions (separate from API Bearer)
+WEB_COOKIE_NAME = "yiban_session"
+
+
+def get_web_user(request: Request, db: Session = Depends(get_db)):
+    """从 Cookie 中解析 JWT，返回 User。未登录返回 None（不抛异常）。"""
+    token = request.cookies.get(WEB_COOKIE_NAME)
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = int(payload.get("sub"))
+        return db.query(User).filter(User.id == user_id).first()
+    except Exception:
+        return None
+
+
+def require_web_user(request: Request, db: Session = Depends(get_db)):
+    """Web 页面专用 — 未登录重定向到登录页。"""
+    user = get_web_user(request, db)
+    if not user:
+        raise HTTPException(status_code=302, headers={"Location": "/login"})
+    return user
+
+# ============================================================
+# Schemas
+# ============================================================
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    phone: str = ""  # 手机号（用于签到，可选）
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user_id: int
+
+class YibanConfigRequest(BaseModel):
+    phone: str
+    password: str
+    school: str = "福州大学"
+    campus: str = "晋江"
+    lat: float = 24.571
+    lng: float = 118.617
+    act: str = "iapp7463"
+    client_id: str = "95626fa3080300ea"
+    push_key: str = ""
+
+class UserProfile(BaseModel):
+    email: str
+    phone: str = ""
+    tier: str
+    expires_at: Optional[datetime] = None
+    subscription_active: bool
+    has_config: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class CheckinLogResponse(BaseModel):
+    id: int
+    created_at: datetime
+    success: bool
+    method: str
+    message: str
+
+    class Config:
+        from_attributes = True
+
+class NotifyRequest(BaseModel):
+    title: str
+    body: str
+    admin_key: str
+
+# ============================================================
+# Web Routes (浏览器访问)
+# ============================================================
+
+@app.get("/", response_class=HTMLResponse)
+def web_index(user=Depends(get_web_user)):
+    return HTMLResponse(content='''<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>易班云签到</title>
+<style>
+body{font-family:-apple-system,sans-serif;background:#f5f5f7;margin:0;padding:40px;text-align:center}
+h1{font-size:40px;margin:40px 0 8px}.sub{color:#666;margin-bottom:32px}
+.btn{display:inline-block;padding:12px 32px;border-radius:8px;font-size:16px;font-weight:600;text-decoration:none;margin:8px}
+.btn-p{background:#007aff;color:#fff}.btn-o{color:#007aff;border:1px solid #007aff}
 .card{background:#fff;border-radius:16px;padding:28px;margin:20px;display:inline-block;width:240px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .price{font-size:36px;font-weight:800;color:#007aff}.price span{font-size:14px;color:#888}
 ul{list-style:none;padding:0;margin:12px 0}li{padding:4px 0;font-size:13px;color:#555}li:before{content:"✓ ";color:#34c759;font-weight:bold}
