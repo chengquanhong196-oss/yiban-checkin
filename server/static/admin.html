@@ -1,0 +1,51 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>管理面板</title>
+<style>body{font-family:-apple-system,sans-serif;background:#f5f5f7;max-width:960px;margin:0 auto;padding:24px}h1{font-size:26px;margin-bottom:8px}.bar{display:flex;gap:12px;margin:20px 0;align-items:center}.bar input{padding:8px 12px;border:1px solid #d2d2d7;border-radius:6px;width:200px}.bar button{padding:8px 16px;background:#007aff;color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer}table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}td,th{padding:10px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;text-align:left}.green{color:#34c759}.red{color:#ff3b30}.orange{color:#ff9500}.card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:16px;display:inline-block;min-width:120px}.card .v{font-size:28px;font-weight:800;color:#007aff}.card .l{font-size:11px;color:#888}.cards{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.err{color:#ff3b30;font-size:13px}.loading{color:#aaa}.btn-sm{padding:4px 10px;font-size:11px;border-radius:4px;border:1px solid #d2d2d7;background:#fff;cursor:pointer;margin:2px}</style></head>
+<body>
+<h1>📊 管理面板</h1>
+<div class=bar>
+  <input id=key type=password placeholder="管理密钥">
+  <button onclick=load()>🔍 查询</button>
+  <span id=status class=loading></span>
+</div>
+<div id=cards class=cards></div>
+<div id=alerts></div>
+<h2>用户列表</h2>
+<div id=users class=loading>输入密钥后点击查询</div>
+<script>
+async function load(){
+  var k=document.getElementById('key').value.trim();
+  if(!k){document.getElementById('status').textContent='请输入密钥';return}
+  document.getElementById('status').textContent='加载中...';
+
+  // Load stats
+  try{
+    var sr=await fetch('/api/health/detailed?admin_key='+k);
+    var stats=await sr.json();
+    if(stats.detail){document.getElementById('status').textContent='密钥错误';return}
+    var c=document.getElementById('cards');
+    c.innerHTML='<div class=card><div class=v>'+stats.stats.total_users+'</div><div class=l>总用户</div></div>'+
+      '<div class=card><div class=v>'+stats.stats.paid_users+'</div><div class=l>付费用户</div></div>'+
+      '<div class=card><div class=v>'+stats.stats.today_success+'/'+stats.stats.today_attempts+'</div><div class=l>今日签到</div></div>'+
+      '<div class=card><div class=v>'+stats.stats.success_rate+'</div><div class=l>成功率</div></div>';
+    if(stats.failure_alerts && stats.failure_alerts.length>0){
+      var a=document.getElementById('alerts');
+      a.innerHTML='<div class=card><h3>⚠️ 异常用户</h3>'+stats.failure_alerts.map(function(f){
+        return '<div style="font-size:13px;padding:4px 0"><b>'+f.email+'</b>: '+f.failure_count+'次失败 — '+f.latest_error.substring(0,60)+'</div>'
+      }).join('')+'</div>';
+    }
+    document.getElementById('status').textContent='✅';
+  }catch(e){document.getElementById('status').textContent='加载失败'}
+
+  // Load users
+  try{
+    var ur=await fetch('/api/admin/users?admin_key='+k+'&size=100');
+    var ud=await ur.json();
+    if(ud.detail){return}
+    var rows=ud.users.map(function(u){
+      var tier={'free':'免费','monthly':'月付','yearly':'年付','lifetime':'永久'}[u.tier]||u.tier;
+      return '<tr><td>'+u.id+'</td><td>'+u.email+'</td><td>'+tier+'</td><td>'+(u.is_active?'✅':'❌')+'</td><td>'+(u.has_config?'✅':'❌')+'</td><td style=font-size:11px>'+u.created_at.substring(0,10)+'</td></tr>'
+    }).join('');
+    document.getElementById('users').innerHTML='<table><tr><th>ID</th><th>邮箱</th><th>会员</th><th>活跃</th><th>配置</th><th>注册日</th></tr>'+rows+'</table><p style=color:#888;margin-top:8px>共 '+ud.total+' 人</p>';
+  }catch(e){document.getElementById('users').innerHTML='加载失败'}
+}
+</script></body></html>

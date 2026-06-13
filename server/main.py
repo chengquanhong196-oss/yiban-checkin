@@ -184,6 +184,10 @@ class NotifyRequest(BaseModel):
 # Web Routes (浏览器访问)
 # ============================================================
 
+@app.get("/admin", response_class=HTMLResponse)
+def admin_panel():
+    return _html("admin.html")
+
 @app.get("/", response_class=HTMLResponse)
 def web_index():
     try:
