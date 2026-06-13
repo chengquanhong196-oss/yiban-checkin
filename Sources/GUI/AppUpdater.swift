@@ -10,7 +10,7 @@ final class AppUpdater: ObservableObject {
     static let shared = AppUpdater()
 
     /// GitHub 仓库地址（可配置为自建服务器）
-    @AppStorage("updateRepo") var repo = "your-username/yiban-checkin"
+    @AppStorage("updateRepo") var repo = "chengquanhong196-oss/yiban-checkin"
     @AppStorage("autoCheckForUpdates") var autoCheckEnabled = true
 
     var lastCheckDate: Date? {
